@@ -1,9 +1,9 @@
-﻿# SVODKI: берёт самый свежий (по дате изменения) подходящий файл из каждой папки sources.txt и копирует в files\srcN рядом со скриптом.
-# По умолчанию ТОЛЬКО сама папка (без подпапок). Ничего никуда не отправляет.
-# sources.txt: ПУТЬ | МАСКА | СЛОВА-ИСКЛЮЧЕНИЯ | дата | подпапки
-#   МАСКА: * = любые символы; если начинается с re: - регулярное выражение по имени файла. Регистр не важен.
-#   «дата» в 4-м поле = только файлы с датой в имени; «подпапки» в 5-м поле = искать и в подпапках.
-#   {ГОД} в пути = текущий год.
+# SVODKI: picks the newest matching Excel file from each folder in sources.txt and copies it to files\srcN.
+# Subfolders are NOT searched unless enabled. Nothing is sent from here.
+# sources.txt: PATH | MASK | EXCLUDE-WORDS | date | subfolders
+#   MASK: * = wildcard; starts with re: = regular expression on the file name. Case-insensitive.
+#   word 'date' (or the Russian word) in field 4 = only names with a date; 'sub' in field 5 = search subfolders.
+#   {YEAR} in path = current year.
 $ErrorActionPreference = 'Stop'
 $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Log = Join-Path $Dir 'log.txt'
@@ -12,7 +12,7 @@ $Cfg = Join-Path $Dir 'sources.txt'
 function Log($m) { $l = '{0} {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m; Add-Content -Path $Log -Value $l -Encoding UTF8; Write-Host $l }
 
 function Find-Best($m) {
-    $p = $m.Folder -replace '(?i)\{(ГОД|YEAR)\}', ('' + (Get-Date).Year)
+    $p = $m.Folder -replace '(?i)\{(\u0413\u041E\u0414|YEAR)\}', ('' + (Get-Date).Year)
     if ($p -match '[*?]') {
         $res = @(Resolve-Path -Path $p -ErrorAction SilentlyContinue | Sort-Object Path -Descending)
         if (-not $res.Count) { Log ('folder not found: ' + $p); return $null }
@@ -48,8 +48,8 @@ try {
         $m = @{ Folder = $parts[0].Trim(); Mask = '*'; Excl = @(); NeedDate = $false; Sub = $false }
         if ($parts.Count -ge 2 -and $parts[1].Trim()) { $m.Mask = $parts[1].Trim() }
         if ($parts.Count -ge 3 -and $parts[2].Trim()) { $m.Excl = @($parts[2].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
-        if ($parts.Count -ge 4 -and $parts[3].Trim() -match '(?i)^(дата|date)$') { $m.NeedDate = $true }
-        if ($parts.Count -ge 5 -and $parts[4].Trim() -match '(?i)^(подпапки|sub)') { $m.Sub = $true }
+        if ($parts.Count -ge 4 -and $parts[3].Trim() -match '(?i)^(\u0434\u0430\u0442\u0430|date)$') { $m.NeedDate = $true }
+        if ($parts.Count -ge 5 -and $parts[4].Trim() -match '(?i)^(\u043F\u043E\u0434\u043F\u0430\u043F\u043A\u0438|sub)') { $m.Sub = $true }
         if ($isExtra -and $groups.Count -gt 0) { [void]$groups[$groups.Count - 1].Add($m) }
         else { $g = New-Object System.Collections.ArrayList; [void]$g.Add($m); [void]$groups.Add($g) }
     }

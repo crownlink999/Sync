@@ -5,8 +5,8 @@
 # Сохранять в UTF-8.
 
 # Диспетчер, сводка №8: имя начинается с «8 - Негізгі...» (прямо в папке, без подпапок)
-\\Kbm.kz\ffs3\GROUPS\Dispatcher|re:^\s*8\s*[-–—_]|||
+\\Kbm.kz\ffs3\GROUPS\Dispatcher|re:^\s*8\s*[-\u2013\u2014_]|||
 # Диспетчер, сводка №9: имя начинается с «9 - ...»
-\\Kbm.kz\ffs3\GROUPS\Dispatcher|re:^\s*9\s*[-–—_]|||
+\\Kbm.kz\ffs3\GROUPS\Dispatcher|re:^\s*9\s*[-\u2013\u2014_]|||
 # Well Status: самый свежий по дате изменения файл в папке архива (без подпапок)
 \\Kbm.kz\ffs3\GROUPS\Engineering & Geology Dept\Engeneer production analysis\Архив Well Status|*well*status*|||

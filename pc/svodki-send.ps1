@@ -1,6 +1,6 @@
-﻿# SVODKI: отправляет файлы из files\srcN на приёмник Google Apps Script (-> GitHub, ветка inbox).
-# send.txt: 1-я строка = адрес веб-приложения, 2-я = KEY. Не изменившиеся файлы повторно не шлются (sent.json).
-# Файл больше 8 МБ режется на части; в одном запросе уходит одна часть, поэтому лимиты Google не мешают.
+# SVODKI: sends files from files\srcN to the Google Apps Script receiver (-> GitHub, branch inbox).
+# send.txt: line 1 = web app URL, line 2 = KEY. Unchanged files are not re-sent (sent.json).
+# Files over 8 MB are split into parts, one part per request.
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 try { [Net.WebRequest]::DefaultWebProxy.Credentials = [Net.CredentialCache]::DefaultCredentials } catch {}
@@ -27,7 +27,7 @@ function Post($url, $key, $item) {
 try {
     $cfg = Get-Content -LiteralPath (Join-Path $Dir 'send.txt') -Encoding UTF8 | Where-Object { $_.Trim() }
     $url = $cfg[0].Trim(); $key = $cfg[1].Trim()
-    if ($url -notmatch '^https://script\.google\.com/') { throw 'send.txt: первая строка должна быть адресом веб-приложения' }
+    if ($url -notmatch '^https://script\.google\.com/') { throw 'send.txt: line 1 must be the web app URL (https://script.google.com/...)' }
     $sent = @{}
     if (Test-Path $State) { (Get-Content $State -Raw -Encoding UTF8 | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $sent[$_.Name] = $_.Value } }
     $names = @()
@@ -44,7 +44,7 @@ try {
                     $off = $i * $CHUNK; $len = [Math]::Min($CHUNK, $bytes.Length - $off)
                     $b64 = [Convert]::ToBase64String($bytes, $off, $len)
                     Post $url $key @{ slot = $d.Name; name = $f.Name; part = ($i + 1); parts = $total; b64 = $b64 }
-                    Log ('send: ' + $k + ' часть ' + ($i + 1) + '/' + $total + ' OK')
+                    Log ('send: ' + $k + ' part ' + ($i + 1) + '/' + $total + ' OK')
                 }
                 $sent[$k] = $s
                 $sent | ConvertTo-Json | Set-Content $State -Encoding UTF8
