@@ -185,6 +185,7 @@ td.nm{font-weight:700;white-space:normal;min-width:130px;max-width:210px}
     <div class="dstep"><button id="dPrev" aria-label="Назад">‹</button><span id="dLbl">—</span><button id="dNext" aria-label="Вперёд">›</button></div>
   </div></div>
   <main id="view"></main>
+  <div class="note" id="ver" style="text-align:center;margin-top:18px"></div>
 </div>
 
 <nav class="nav" id="nav" hidden><div class="in"></div></nav>
@@ -294,13 +295,14 @@ const TABS=[
  ['idle','Простои','<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'],
  ['ppd','ППД','<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>'],
  ['steam','Пар','<path d="M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.7-1A4 4 0 0 1 17 18z"/><path d="M9 21v-1M13 21v-1M17 21v-1"/>'],
+ ['wells','Скважины','<circle cx="12" cy="5" r="2"/><path d="M12 7v14M8 21h8M7 11l5 3 5-3"/>'],
  ['more','Ещё','<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>']
 ];
 function buildNav(){ $('#nav .in').innerHTML=TABS.map(t=>`<button data-t="${t[0]}"><svg viewBox="0 0 24 24">${t[2]}</svg>${t[1]}</button>`).join('');
   $('#nav').addEventListener('click',e=>{const b=e.target.closest('button'); if(b){S.tab=b.dataset.t; render(true);} }); }
 function render(top){ document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===S.tab));
   const dd=D.meta.day; $('#dLbl').textContent=`${S.day} ${MG[curM()-1]}`; $('#dPrev').disabled=S.day<=1; $('#dNext').disabled=S.day>=dd;
-  const fn={home:vHome,oil:vOil,idle:vIdle,ppd:vPpd,steam:vSteam,more:vMore}[S.tab]; $('#view').innerHTML=fn(); bindCharts($('#view')); bindView();
+  const fn={home:vHome,oil:vOil,idle:vIdle,ppd:vPpd,steam:vSteam,wells:vWells,more:vMore}[S.tab]; $('#view').innerHTML=fn(); bindCharts($('#view')); bindView(); if(S.tab==='wells'&&WS) bindWells();
   if(top) window.scrollTo({top:0}); }
 
 /* ======================= ГЛАВНАЯ ======================= */
@@ -574,6 +576,109 @@ function bindView(){
   v.querySelectorAll('[data-kr]').forEach(b=>b.addEventListener('click',()=>showKr(+b.dataset.kr)));
 }
 
+/* ======================= СКВАЖИНЫ (Well Status) ======================= */
+let WS=null, WSERR=null, WSLOAD=false;
+S.w={q:'',cat:'all',area:'all',prob:'loss',lim:40,per:'90',obj:'Общий'};
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const CATN={work:'Работают',pe:'Периодические',idle:'Бездействие',rep:'Ремонт / ожидание / исследование',wet:'Обводнены',reg:'Регулирование',other:'Прочие'};
+const CATC={work:C.fact,pe:C.blue,idle:C.bad,rep:C.plan,wet:C.violet,reg:C.teal,other:C.grey};
+const AREAN={east:'Восток','vvg':'ВВГ','ptv-2':'ПТВ-2','ptv-3':'ПТВ-3'};
+const areaN=a=>AREAN[a]||a||'—';
+const fdate=s=>s?`${s.slice(8,10)}.${s.slice(5,7)}.${s.slice(2,4)}`:'—';
+async function loadWS(){ if(WSLOAD)return; WSLOAD=true;
+  try{ const r=await fetch('data/wellstatus.json?'+Date.now()); if(!r.ok)throw 0; WS=await r.json(); WS.wells.forEach(w=>{ w.loss=(w.c==='work'&&w.pn>0&&w.n!=null)?w.pn-w.n:0; }); }
+  catch(e){ WSERR=true; }
+  if(S.tab==='wells') render(); }
+const wAct=()=>WS.wells.filter(w=>w.c==='work');
+function wSum(L,k){ return L.reduce((s,w)=>s+(w[k]||0),0); }
+function wProb(){ const A=wAct(), P=S.w.prob;
+  if(P==='loss') return {t:'Ниже техрежима по Qн',L:A.filter(w=>w.loss>0.3).sort((a,b)=>b.loss-a.loss),v:w=>`−${fmt(w.loss,1)} т`,s:w=>`Qн ${fmt(w.n,1)} при режиме ${fmt(w.pn,1)}`};
+  if(P==='eff') return {t:'Низкий КПД насоса (<35 %)',L:A.filter(w=>w.ef!=null&&w.ef<35&&w.q>5).sort((a,b)=>b.q-a.q),v:w=>`${fmt(w.ef)} %`,s:w=>`Qж ${fmt(w.q)} · ${esc(w.pm||w.t)}`};
+  if(P==='wc') return {t:'Обводнённость выше режима на 5+ п.п.',L:A.filter(w=>w.w!=null&&w.pw!=null&&w.w-w.pw>=5).sort((a,b)=>(b.w-b.pw)-(a.w-a.pw)),v:w=>`+${fmt(w.w-w.pw)} п.п.`,s:w=>`${fmt(w.w)} % при режиме ${fmt(w.pw)} %`};
+  if(P==='sub') return {t:'Низкое погружение насоса (<10 м)',L:A.filter(w=>w.sb!=null&&w.sb<10&&w.t.startsWith('ск')).sort((a,b)=>b.q-a.q),v:w=>`${fmt(w.sb)} м`,s:w=>`Qж ${fmt(w.q)} · Ндин ${fmt(w.dl)}`};
+  if(P==='stale') return {t:'Давно не было замера Qж (7+ дн.)',L:A.filter(w=>w.lq!=null&&w.lq>=7).sort((a,b)=>b.lq-a.lq),v:w=>`${w.lq} дн.`,s:w=>`замер ${fdate(w.dq)} · Qж ${fmt(w.q)}`};
+  if(P==='idle') return {t:'Бездействие — потенциал по режиму',L:WS.wells.filter(w=>w.c==='idle'&&w.pn>0).sort((a,b)=>b.pn-a.pn),v:w=>`${fmt(w.pn,1)} т`,s:w=>esc(w.st)+(w.wo?' · ремонт '+fdate(w.wo):'')};
+  return {t:'',L:[],v:()=>'',s:()=>''}; }
+const PROBS=[['loss','От режима'],['idle','Бездействие'],['eff','КПД насоса'],['wc','Обводнённость'],['sub','Погружение'],['stale','Замеры']];
+function wRow(w,v,s){ return `<tr class="clk" data-w="${esc(w.id)}"><td class="nm">${esc(w.id)}<small class="mut" style="display:block;font-weight:500">${esc(w.g)} · ${esc(w.t)}</small></td><td class="num" style="white-space:normal;text-align:left;color:var(--mut);font-size:12px">${s}</td><td class="num"><b>${v}</b></td></tr>`; }
+function wProbHtml(){ const p=wProb(), L=p.L, show=L.slice(0,12);
+  return `<div class="sub">${p.t}: <b>${L.length}</b> скв.</div>`+(L.length?`<div class="tw"><table><tbody>${show.map(w=>wRow(w,p.v(w),p.s(w))).join('')}</tbody></table></div>${L.length>12?`<div class="note">Показаны 12 из ${L.length}. Остальные — в списке ниже (поиск).</div>`:''}`:'<div class="empty">Нет таких скважин</div>'); }
+function wFilter(){ const f=S.w, q=f.q.trim().toLowerCase();
+  return WS.wells.filter(w=>(f.cat==='all'||w.c===f.cat)&&(f.area==='all'||w.a===f.area)&&(!q||w.id.toLowerCase().includes(q)||(w.g||'').toLowerCase().includes(q)||(w.st||'').toLowerCase().includes(q))); }
+function wListHtml(){ const L=wFilter(), f=S.w, sh=L.slice(0,f.lim);
+  return `<div class="sub">Найдено: <b>${L.length}</b></div><div class="tw"><table><thead><tr><th>Скв. / ГЗУ</th><th>Статус</th><th>Qж</th><th>Qн</th><th>Обв.%</th></tr></thead><tbody>${sh.map(w=>`<tr class="clk" data-w="${esc(w.id)}"><td class="nm">${esc(w.id)}<small class="mut" style="display:block;font-weight:500">${esc(w.g)} · ${esc(w.t)}</small></td><td style="text-align:left;white-space:normal;font-size:12px;color:var(--mut)">${esc(w.st)||'—'}</td><td class="num">${fmt(w.q,0)}</td><td class="num">${fmt(w.n,1)}</td><td class="num">${fmt(w.w)}</td></tr>`).join('')}</tbody></table></div>${L.length>f.lim?`<button class="cp" id="wMore" style="margin-top:10px;width:100%">Показать ещё (${L.length-f.lim})</button>`:''}`; }
+function wDyn(){ const f=S.w, d=WS.daily, m=WS.monthly; let labels,qn,qj,wc,tl;
+  if(f.per==='m'){ tl=i=>m.m[i]; qn=m.qn; qj=m.qj; wc=m.wc; labels=m.m.map(x=>x.slice(5)==='01'?x.slice(0,4):x.slice(2)); }
+  else { const n=f.per==='90'?90:d.d.length, a=Math.max(0,d.d.length-n), ob=d.obj[f.obj]; labels=d.d.slice(a).map(x=>x.slice(8)+'.'+x.slice(5,7)); const ds=d.d.slice(a); tl=i=>fdate(ds[i]); qj=ob.slice(a).map(x=>x[0]); qn=ob.slice(a).map(x=>x[1]); wc=ob.slice(a).map(x=>x[2]); }
+  let h=chart({labels,tl,series:[{n:'Qн, т/сут',c:C.fact,v:qn,t:'area',d:0}],h:200,xt:8,pl:50});
+  h+=`<div class="sub" style="margin-top:12px"><b>Обводнённость, %</b></div>`+chart({labels,tl,series:[{n:'Обводнённость, %',c:C.blue,v:wc,d:1}],h:150,xt:8,pl:50,yf:v=>fmt(v,0)});
+  if(f.per!=='m'&&f.obj!=='Общий'){ const dv=d.dev[f.obj], a=Math.max(0,d.d.length-(f.per==='90'?90:d.d.length)); h+=`<div class="sub" style="margin-top:12px"><b>Отклонение Qн от техрежима, т/сут</b></div>`+chart({labels,tl,series:[{n:'Отклонение',c:C.bad,t:'bar',v:dv.slice(a),cf:v=>v<0?C.bad:C.fact,d:1}],h:150,xt:8,pl:50}); }
+  return h; }
+function vWells(){
+  if(!WS){ if(!WSLOAD)loadWS(); return `<div class="empty">${WSERR?'Нет данных Well Status (data/wellstatus.json). Он появится после первой отправки файла с рабочего ПК.':'Загрузка скважин…'}</div>`; }
+  const W=WS.wells, A=wAct(), tot=W.length;
+  const qj=wSum(W,'q'), qn=wSum(W,'n'), pn=wSum(A.filter(w=>w.pn>0),'pn'), qnA=wSum(A.filter(w=>w.pn>0),'n');
+  const loss=wSum(A.filter(w=>w.loss>0),'loss'), gain=-wSum(A.filter(w=>w.loss<0),'loss');
+  const wcF=qj?W.reduce((s,w)=>s+(w.q||0)*(w.w||0),0)/qj:null, wcP=A.length?A.reduce((s,w)=>s+(w.q||0)*(w.pw||0),0)/(wSum(A,'q')||1):null;
+  const wcA=wSum(A,'q')?A.reduce((s,w)=>s+(w.q||0)*(w.w||0),0)/wSum(A,'q'):null;
+  const dev=qnA-pn, d9=WS.meta.date, age=Math.round((new Date(D.meta.year,D.meta.month-1,D.meta.day)-new Date(d9))/864e5);
+  const kc=(nm,big,unit,pl,chp)=>`<div class="kc"><div class="nm"><span>${nm}</span></div><div class="big num">${big}<small>${unit}</small></div><div class="pl">${pl||''}</div>${chp?`<div style="margin-top:6px">${chp}</div>`:''}</div>`;
+  let h=`<div class="sec">Скважины · Well Status на ${fdate(d9)}</div>`;
+  if(age>=2) h+=`<div class="card" style="border-color:#f0d9a2;background:var(--warnbg)"><b>Файл Well Status старше сводки на ${age} дн.</b><div class="sub">Новый файл ещё не пришёл с рабочего ПК.</div></div>`;
+  h+=`<div class="grid g4">`+
+   kc('Фонд',fmt(tot),'скв.',`работают ${fmt(A.length)} · бездейств. ${fmt(W.filter(w=>w.c==='idle').length)}`)+
+   kc('Жидкость',fmt(qj),'м³/сут',`обводн. ${fmt(wcF,1)} %`)+
+   kc('Нефть по скважинам',fmt(qn),'т/сут',`режим работающих ${fmt(pn)} · факт ${fmt(qnA)}`,chip(dev,sgn(dev,0)+' т к режиму'))+
+   kc('Обводнённость',fmt(wcA,1),'%',`режим ${fmt(wcP,1)} %`,chip(wcA!=null&&wcP!=null?wcA-wcP:null,sgn(wcA-wcP,1)+' п.п.',true))+`</div>`;
+  h+=`<div class="note">Qн по скважинам (Well Status) считается по замерам и отличается от «Добычи факт» оперативной сводки — это разные методики.</div>`;
+  // фонд
+  const cats=Object.keys(CATN).map(k=>{const L=W.filter(w=>w.c===k);return {k,n:L.length,q:wSum(L,'n')}}).filter(x=>x.n);
+  h+=`<div class="card"><h3>Фонд по состоянию</h3><div class="sub">Нажмите строку — отфильтрует список скважин ниже</div>`+cats.map(x=>`<div data-cat="${x.k}" style="cursor:pointer">`+hbars([{t:CATN[x.k],s:`Qн ${fmt(x.q)} т/сут`,v:x.n,vs:'',c:CATC[x.k],hot:x.k==='idle'}])+'</div>').join('')+`</div>`;
+  // зоны
+  const ar=[...new Set(W.map(w=>w.a))].filter(Boolean).map(a=>{const L=A.filter(w=>w.a===a&&w.pn>0);return {a,t:areaN(a),n:L.length,d:wSum(L,'n')-wSum(L,'pn'),idle:W.filter(w=>w.a===a&&w.c==='idle').length}}).sort((x,y)=>x.d-y.d);
+  h+=`<div class="card"><h3>Отклонение Qн от техрежима по зонам</h3><div class="sub">Только работающие скважины: факт − режим, т/сут</div>`+hbars(ar.map(x=>({t:x.t,s:`${x.n} скв. · бездейств. ${x.idle}`,v:Math.abs(x.d),vs:'т/сут',c:x.d<0?C.bad:C.fact,hot:x.d<-30})).map((o,i)=>({...o,vt:sgn(ar[i].d,0)})))+`</div>`;
+  const gz=[...new Set(W.map(w=>w.g))].filter(Boolean).map(g=>{const L=A.filter(w=>w.g===g&&w.pn>0);return {g,n:L.length,d:wSum(L,'n')-wSum(L,'pn')}}).filter(x=>x.n).sort((x,y)=>x.d-y.d).slice(0,10);
+  h+=`<div class="card"><h3>ГЗУ с наибольшим недобором</h3><div class="sub">10 худших по отклонению Qн от режима</div>`+hbars(gz.map(x=>({t:esc(x.g),s:x.n+' скв.',v:Math.abs(x.d),vs:'т/сут',c:C.bad,hot:x.d<0})))+`</div>`;
+  // динамика
+  const objs=Object.keys(WS.daily.obj);
+  h+=`<div class="card"><h3>Динамика</h3><div class="seg" id="wPer" style="margin-top:8px"><button data-p="90" class="${S.w.per==='90'?'on':''}">90 дней</button><button data-p="all" class="${S.w.per==='all'?'on':''}">Год</button><button data-p="m" class="${S.w.per==='m'?'on':''}">С 2013</button></div>`+
+   (S.w.per!=='m'?`<div class="chips" id="wObj">${objs.map(o=>`<button class="cp ${o===S.w.obj?'on':''}" data-o="${esc(o)}">${esc(o)}</button>`).join('')}</div>`:'')+`<div id="wDyn">${wDyn()}</div></div>`;
+  // проблемы
+  h+=`<div class="card"><h3>Что не так</h3><div class="chips" id="wProb">${PROBS.map(p=>`<button class="cp ${S.w.prob===p[0]?'on':''}" data-pr="${p[0]}">${p[1]}</button>`).join('')}</div><div id="wPrb">${wProbHtml()}</div></div>`;
+  // список
+  const areas=[...new Set(W.map(w=>w.a))].filter(Boolean);
+  h+=`<div class="card"><h3>Все скважины</h3><input id="wQ" type="search" placeholder="Номер скважины, ГЗУ, статус…" value="${esc(S.w.q)}" style="width:100%;margin-top:10px;padding:11px 14px;border:1px solid var(--line);border-radius:12px;font:inherit;background:#fafbf9">
+   <div class="chips" id="wCat"><button class="cp ${S.w.cat==='all'?'on':''}" data-c="all">Все</button>${cats.map(x=>`<button class="cp ${S.w.cat===x.k?'on':''}" data-c="${x.k}">${CATN[x.k].split(' ')[0]} ${x.n}</button>`).join('')}</div>
+   <div class="chips" id="wAr" style="margin-top:-4px"><button class="cp ${S.w.area==='all'?'on':''}" data-a="all">Все зоны</button>${areas.map(a=>`<button class="cp ${S.w.area===a?'on':''}" data-a="${esc(a)}">${areaN(a)}</button>`).join('')}</div><div id="wL">${wListHtml()}</div></div>`;
+  return h; }
+function showWell(id){ const w=WS.wells.find(x=>x.id===id); if(!w)return;
+  const dq=w.n!=null&&w.pn>0?w.n-w.pn:null, dw=w.w!=null&&w.pw!=null?w.w-w.pw:null;
+  const kv=(a,b)=>`<div class="kc" style="padding:10px 12px"><div class="nm">${a}</div><div class="big num" style="font-size:19px">${b}</div></div>`;
+  const hs=(t,a,col)=>a&&a.length>1?`<div class="card" style="margin:10px 0"><h3 style="font-size:13px">${t}</h3>${spark(a,null,col)}<div class="mt" style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--mut)"><span>${fmt(a[0],0)}</span><span>${fmt(last(a),0)}</span></div></div>`:'';
+  const fl=[]; if(w.fl==='leak')fl.push('работает с пропуском'); if(w.fl==='loweff')fl.push('низкая эффективность насоса'); if(w.hz)fl.push('горизонтальная'); if(w.zbs)fl.push('ЗБС'); if(w.rp)fl.push('ожидает ремонта');
+  openSheet(`<h3 style="font-size:19px;margin:6px 34px 4px 0">Скв. ${esc(w.id)} <span class="pill">${esc(w.g)}</span><span class="pill">${esc(w.t)}</span></h3>
+   <div class="sub mut">${esc(w.st)||'—'} · ${areaN(w.a)}${fl.length?' · '+fl.join(', '):''}</div>
+   <div class="grid g3" style="margin-top:12px">${kv('Qж, м³/сут',fmt(w.q,0))}${kv('Qн, т/сут',fmt(w.n,1)+(dq!=null?` <span class="chip ${cls(dq)}">${sgn(dq,1)}</span>`:''))}${kv('Обводнённость, %',fmt(w.w)+(dw!=null?` <span class="chip ${cls(dw,1)}">${sgn(dw,0)}</span>`:''))}</div>
+   <div class="note">Для Qн и обводнённости в скобках — отклонение от техрежима (режим: Qж ${fmt(w.pq)}, Qн ${fmt(w.pn,1)}, обв. ${fmt(w.pw)} %).</div>
+   <div class="card"><h3>Оборудование и режим</h3><table><tbody>
+   <tr><td>Насос</td><td>${esc(w.pm)||'—'}</td></tr><tr><td>Привод / тип</td><td>${esc(w.pj)||'—'}</td></tr>
+   <tr><td>КПД насоса</td><td class="${w.ef!=null&&w.ef<35?'bad':''}">${fmt(w.ef)} %</td></tr>
+   <tr><td>Погружение</td><td>${fmt(w.sb)} м</td></tr><tr><td>Динамический уровень</td><td>${fmt(w.dl)} м</td></tr>
+   <tr><td>Глубина подвески</td><td>${fmt(w.pd)} м</td></tr><tr><td>Обороты / ходы</td><td>${fmt(w.rpm,1)}</td></tr>
+   <tr><td>Последний ремонт</td><td>${fdate(w.wo)}</td></tr><tr><td>Замер Qж</td><td>${fdate(w.dq)}${w.lq!=null?` (${w.lq} дн. назад)`:''}</td></tr>
+   <tr><td>Замер уровня</td><td>${fdate(w.dd)}${w.ld!=null&&w.ld>=0?` (${w.ld} дн. назад)`:''}</td></tr>
+   <tr><td>Зона влияния</td><td style="white-space:normal">${esc(w.inf)||'—'}</td></tr></tbody></table></div>
+   ${hs('Qж, последние замеры',w.hq,C.fact)}${hs('Динамический уровень, м',w.hd,C.blue)}${hs('Обводнённость, %',w.hw,C.violet)}`); }
+function bindWells(){ const v=$('#view'), keep=()=>{const y=scrollY;render();scrollTo(0,y)};
+  v.onclick=e=>{ const t=e.target.closest('[data-w]'); if(t) showWell(t.dataset.w); };
+  const on=(sel,att,fn)=>v.querySelectorAll(sel+' button').forEach(b=>b.addEventListener('click',()=>{fn(b.dataset[att]);keep()}));
+  on('#wPer','p',x=>S.w.per=x); on('#wObj','o',x=>S.w.obj=x); on('#wProb','pr',x=>S.w.prob=x);
+  on('#wCat','c',x=>{S.w.cat=x;S.w.lim=40}); on('#wAr','a',x=>{S.w.area=x;S.w.lim=40});
+  v.querySelectorAll('[data-cat]').forEach(b=>b.addEventListener('click',()=>{S.w.cat=b.dataset.cat;S.w.lim=40;keep()}));
+  const q=$('#wQ'); if(q) q.addEventListener('input',()=>{S.w.q=q.value;S.w.lim=40;$('#wL').innerHTML=wListHtml();bindMore()});
+  bindMore(); }
+function bindMore(){ const m=$('#wMore'); if(m) m.onclick=()=>{S.w.lim+=60;$('#wL').innerHTML=wListHtml();bindMore()}; }
+
 /* ======================= запуск ======================= */
 async function boot(){
   try{ const r=await fetch('data.json?'+Date.now()); D=await r.json(); }catch(e){ document.body.innerHTML='<div class="empty">Не удалось загрузить data.json</div>'; return; }
@@ -581,6 +686,9 @@ async function boot(){
   $('#cvDate').textContent=`Сводка за ${dd} ${MG[D.meta.month-1]} ${D.meta.year}`;
   $('#cvK').innerHTML=['oil','sd','steam'].map(k=>{const x=K(k,dd); return `<div class="cv-k"><i>${x.name}</i><b class="num">${fmt(x.dayFact)}</b><small>${x.unit}</small></div>`}).join('');
   buildNav();
+  fetch('version.json?'+Date.now()).then(r=>r.ok?r.json():null).then(v=>{ if(!v)return; const s=v.src||{}, f=x=>x&&x.date&&x.date!=='0001-01-01'?x.date.slice(8)+'.'+x.date.slice(5,7):'—';
+    const age=(Date.now()-new Date(v.built.replace(' ','T')+':00+05:00'))/36e5;
+    $('#ver').innerHTML=`Обновлено ${v.built.slice(8,10)}.${v.built.slice(5,7)} ${v.built.slice(11)} · №8 от ${f(s.f8)} · №9 от ${f(s.f9)} · Well Status от ${f(s.ws)}`+(age>30?' <b class="bad">· данные устарели</b>':'')+((v.warn||[]).length?'<br><span class="bad">'+v.warn.join('<br>')+'</span>':''); }).catch(()=>{});
   $('#dPrev').onclick=()=>{ if(S.day>1){S.day--;render()} }; $('#dNext').onclick=()=>{ if(S.day<D.meta.day){S.day++;render()} };
   $('#bk').onclick=closeSheet; $('#shX').onclick=closeSheet;
   const go=()=>{ $('#app').hidden=false; $('#nav').hidden=false; render(true); $('#cover').classList.add('out'); setTimeout(()=>$('#cover').remove(),600); };

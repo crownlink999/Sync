@@ -8,25 +8,34 @@
 9-сводка  — суточный рапорт на дату (Добыча, КРС, бурение, ...)
 план-год  — помесячный план добычи/сдачи (лист 'Добыча Сдача ')
 """
-import sys, json, re, datetime as dt
+import sys, os, json, re, datetime as dt
 import openpyxl
 
 MONTHS_KK = ['қаңтар', 'ақпан', 'наурыз', 'сәуір', 'мамыр', 'маусым', 'шілде', 'тамыз', 'қыркүйек', 'қазан', 'қараша', 'желтоқсан']
 MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
-# ---- плановые данные, которых нет в приложенных xlsx (взяты с фото «Еженедельный отчёт ПУ») ----
-STEAM_PLAN_MONTH = [521321, 470870, 521321, 504504, 518781, 503469, 513794, 513794, 496225, 521321, 504504, 521321]  # т
-VOLGA_PLAN_MONTH = [192489.87, 176178.13, 193837.87, 187158.29, 193292.71, 189337.41, 191122.47, 188588.47,
-                    180263.25, 68320.87, 69934.29, 70376.37]  # м3, ОТМ
-OZPV_PLAN_NOV = 510000
-OZPV_YEAR_PLAN = 5113000
-OZPV_YTD_PLAN = 4416000     # с начала года (еженедельный отчёт ПУ на 20.11)
+# ---- плановые данные (месячные планы пара/воды/ОЗПВ) лежат в data/plan.json ----
 
 # ---- словарь казахских причин (КРС) ----
 KK_REASON = {
     'сорап ақауы': 'дефект насоса', 'тұтылған': 'заклинивание/прихват', 'скқ ақауы': 'дефект НКТ',
     'саға ақауы': 'дефект устья', 'шыбық сынған': 'обрыв штанг',
 }
+
+
+PLAN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'plan.json')
+
+
+def load_plan(f3):
+    """План: data/plan.json (год, нефть, сдача, пар, Волжская вода, ОЗПВ). Если дан файл плана - обновляет нефть/сдачу."""
+    P = json.load(open(PLAN_FILE, encoding='utf-8'))
+    if f3 and f3 != '-' and os.path.exists(f3):
+        wb3 = openpyxl.load_workbook(f3, data_only=True)
+        p = wb3['Добыча Сдача ']
+        P['oil'] = [p.cell(8 + m, 3).value for m in range(1, 13)]
+        P['sd'] = [p.cell(8 + m, 5).value for m in range(1, 13)]
+        json.dump(P, open(PLAN_FILE, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    return P
 
 
 def clean(v):
@@ -81,11 +90,14 @@ def find_month_rows(ws, col, names):
 
 
 def main():
-    f8, f9, f3 = sys.argv[1:4]
+    # usage: build_data.py <8.xlsx> <9.xlsx> [<план-год.xlsx>|-] [out=data.json]
+    f8, f9 = sys.argv[1:3]
+    f3 = sys.argv[3] if len(sys.argv) > 3 else '-'
     out = sys.argv[4] if len(sys.argv) > 4 else 'data.json'
     wb8 = openpyxl.load_workbook(f8, data_only=True)
     wb9 = openpyxl.load_workbook(f9, data_only=True)
-    wb3 = openpyxl.load_workbook(f3, data_only=True)
+    PLAN = load_plan(f3)
+    STEAM_PLAN_MONTH = PLAN['steam']; VOLGA_PLAN_MONTH = PLAN['volga']
 
     # ---------- дата ----------
     s1 = wb8['1-Мәліметтер']
@@ -97,10 +109,9 @@ def main():
                   'months': MONTHS_RU}}
 
     # ---------- план по месяцам (файл 3) ----------
-    p = wb3['Добыча Сдача ']
-    oil_plan = [p.cell(8 + m, 3).value for m in range(1, 13)]
-    sd_plan = [p.cell(8 + m, 5).value for m in range(1, 13)]
-    gas_plan = [wb3['Газ'].cell(5 + m, 3).value for m in range(1, 13)]
+    oil_plan = PLAN['oil']; sd_plan = PLAN['sd']; gas_plan = PLAN.get('gas')
+    if PLAN.get('year') and PLAN['year'] != d.year:
+        print('ВНИМАНИЕ: план в data/plan.json на %s год, а сводка за %s — обновите план' % (PLAN['year'], d.year))
 
     # ---------- основные ряды из листа 1-Мәліметтер ----------
     def series_first(row0, plan_month, name, unit, with_plan_cols=True):
@@ -134,8 +145,10 @@ def main():
     ozpv = {'name': 'Опреснённая вода ОЗПВ', 'unit': 'м³', 'daily': {}, 'dayPlan': {}, 'monthPlan': {}}
     for m in range(1, month + 1):
         ozpv['daily'][m] = trim(row_vals(sw, oz_rows[m] + 1, 2, 31))
-    ozpv['monthPlan'][month] = OZPV_PLAN_NOV
-    ozpv['dayPlan'][month] = round(OZPV_PLAN_NOV / dim, 2)
+    for mm, pv in PLAN['ozpv_month'].items():
+        ozpv['monthPlan'][int(mm)] = pv
+    if ozpv['monthPlan'].get(month):
+        ozpv['dayPlan'][month] = round(ozpv['monthPlan'][month] / dim, 2)
     series['ozpv'] = ozpv
     # Волжская вода – лист Волжская вода
     sv = wb8['Волжская вода']
@@ -175,9 +188,11 @@ def main():
 
     summary = {k: summ(k) for k in ('oil', 'sd', 'steam', 'volga')}
     oz = summ('ozpv')
-    oz['yearPlan'] = OZPV_YEAR_PLAN
-    oz['ytdPlan'] = OZPV_YTD_PLAN
-    oz['ytdDev'] = oz['ytdFact'] - OZPV_YTD_PLAN
+    oz_pm = {int(k): v for k, v in PLAN['ozpv_month'].items()}
+    oz_known = PLAN['ozpv_before'] + sum(v for m_, v in oz_pm.items() if m_ < month)   # янв-окт одной суммой + полные месяцы
+    oz['yearPlan'] = PLAN['ozpv_before'] + sum(oz_pm.values())
+    oz['ytdPlan'] = round(oz_known + oz['mtdPlan']) if month >= min(oz_pm) else None
+    oz['ytdDev'] = oz['ytdFact'] - oz['ytdPlan'] if oz['ytdPlan'] is not None else None
     summary['ozpv'] = oz
     bf = sum(bit['monthFact'].values() or [0])
     summary['bitum'] = {'monthPlan': None, 'mtdPlan': bit['monthPlan'].get(month) or 0, 'mtdFact': bit['monthFact'].get(month),
@@ -405,6 +420,11 @@ def main():
     today['ppg3'] = {'steam': num(ms['B4'].value), 'mtd': num(ms['C4'].value), 'volga': num(ms['B5'].value), 'volgaMtd': num(ms['C5'].value), 'pressure': num(ms['B6'].value)}
     today['ppgSpguTotals'] = {'mpgu': num(ms['G30'].value), 'mpgu23': num(ms['G63'].value), 'spgu': num(ms['G168'].value), 'collPPG': num(ms['G169'].value)}
     D['today'] = today
+    try:
+        e1 = r9['E1'].value
+        D['meta']['d9'] = e1.strftime('%Y-%m-%d') if hasattr(e1, 'strftime') else None
+    except Exception:
+        D['meta']['d9'] = None
 
     # текущий месяц: обрезаем будущие дни (в источнике там нули/формулы)
     def cut(o, in_cur=False):
