@@ -63,6 +63,78 @@ def lab(*vals):
     return re.sub(r'\s+', ' ', s).strip(' |')
 
 
+KK_RU = [('Күрделі жөндеуде', 'в капитальном ремонте'), ('күрделі жөндеуде', 'в капитальном ремонте'), ('Күрделі жөндеу', 'капитальный ремонт'),
+         ('Ағымдағы жөндеуде', 'в текущем ремонте'), ('жөндеуде', 'в ремонте'), ('жөндеу', 'ремонт'), ('Бу шығыны', 'недодано пара'), ('бу шығыны', 'недодано пара'),
+         ('тоқтатылды', 'остановлен'), ('тоқтады', 'остановлен'), ('қосылды', 'включён'), ('сөндірілді', 'отключён'), ('жоқ', 'нет'), ('су', 'вода'),
+         ('газ', 'газ'), ('тн', ' т')]
+
+
+def ru_text(s):
+    for a, b in KK_RU:
+        s = s.replace(a, b)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def unit_reasons(text):
+    """Причины по установкам из текста пояснения: 'СПГУ-18тн №2 Күрделі жөндеуде. Бу шығыны: 384тн' -> {('СПГУ',2): 'в капитальном ремонте. недодано пара: 384 т'}"""
+    out = {}
+    pat = re.compile(r'(СПГУ|МПГУ)[-\w. ]*?№\s*(\d+)', re.I)
+    ms = list(pat.finditer(text))
+    for i, m in enumerate(ms):
+        end = ms[i + 1].start() if i + 1 < len(ms) else len(text)
+        out[(m.group(1).upper(), int(m.group(2)))] = ru_text(text[m.end():end]).strip(' .,;:')
+    return out
+
+
+MKK = {n.lower(): i + 1 for i, n in enumerate(MONTHS_KK)}
+
+
+def parse_liq(ws, month, day):
+    """лист 'Qж.': итого / ЦДН-1..3 / ГЗУ; Кориолис, без регенерации, замер, обводнённость; по месяцам года"""
+    res = {}
+    sec = None
+    for r in range(1, ws.max_row + 1):
+        a = ws.cell(r, 1).value
+        mon = ws.cell(r, 2).value
+        if isinstance(a, str) and a.strip():
+            t = a.strip()
+            if re.match(r'Барлығы:\s*МӨЦ-1\s*\+', t):
+                sec = 'ИТОГО'
+            elif re.match(r'Барлығы:\s*МӨЦ-([123])', t):
+                sec = 'ЦДН-' + re.match(r'Барлығы:\s*МӨЦ-([123])', t).group(1)
+            elif t.startswith('ГЗУ'):
+                sec = re.sub(r'\s+', ' ', t)
+            else:
+                sec = None
+        if not isinstance(mon, str) or mon.strip().lower() not in MKK or sec is None:
+            continue
+        m = MKK[mon.strip().lower()]
+        if m > month:
+            continue
+        kind_t = str(ws.cell(r, 3).value or '')
+        if 'экол' in kind_t:
+            continue
+        if '% Суы' in kind_t:
+            kind = 'wc'
+        elif 'регенерациясыз' in kind_t:
+            kind = 'noreg'
+        elif 'Замеру' in kind_t:
+            kind = 'zam'
+        elif 'Кариол' in kind_t:
+            kind = 'kor'
+        else:
+            continue
+        n = day if m == month else 31
+        vals = []
+        for c in range(4, 4 + n):
+            v = ws.cell(r, c).value
+            vals.append(round(v, 1) if isinstance(v, (int, float)) and not isinstance(v, bool) and v else None)
+        while vals and vals[-1] is None:
+            vals.pop()
+        res.setdefault(str(m), {}).setdefault(sec, {})[kind] = vals
+    return res
+
+
 def row_vals(ws, r, c0, n=31):
     out = []
     for c in range(c0, c0 + n):
@@ -417,6 +489,73 @@ def main():
             units.append({'name': name, 'kind': kind, 'nominal': nominal[kind], 'steam': steam_d, 'dry': num(ms.cell(r, 5).value), 'hours': num(ms.cell(r, 8).value),
                           'where': lab(ms.cell(r, 2).value, ms.cell(r + 1, 2).value, ms.cell(r + 1, 3).value, ms.cell(r + 3, 3).value) if kind != 'МПГУ-11тн' else lab(ms.cell(r, 2).value)})
     today['units'] = units
+    # --- приостановки и недовыработка пара ---
+    reas = {}
+    for r_ in range(30, 34):
+        t_ = r9.cell(r_, 6).value
+        if t_:
+            reas.update(unit_reasons(str(t_)))
+    hist_p = os.path.join(os.path.dirname(PLAN_FILE), 'units_hist.json')
+    try:
+        hist = json.load(open(hist_p, encoding='utf-8'))
+    except Exception:
+        hist = {}
+    dkey = d.strftime('%Y-%m-%d')
+    hist[dkey] = {u['name']: [u['steam'] or 0, u['hours'] or 0] for u in units}
+    for k_ in sorted(hist)[:-120]:
+        del hist[k_]
+    json.dump(hist, open(hist_p, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
+    import statistics
+    ref = {}
+    for kd in ('МПГУ-11тн', 'МПГУ-23т', 'СПГУ-18тн'):
+        run_ = [u['steam'] for u in units if u['kind'] == kd and (u['steam'] or 0) > 0]
+        ref[kd] = statistics.median(run_) if run_ else 0
+    issues = []
+    for u in units:
+        mnum = re.search(r'№\s*(\d+)', u['name'])
+        no = int(mnum.group(1)) if mnum else None
+        grp = u['name'][:4].upper()
+        why = reas.get((grp, no))
+        st = u['steam'] or 0
+        rf = ref[u['kind']]
+        if st <= 0:
+            status = 'stop'
+        elif rf and st < rf * 0.95:
+            status = 'low'
+        else:
+            continue
+        since, est, days = None, False, None
+        if status == 'stop':
+            # по накопленной истории сводок
+            prev = None
+            for k_ in sorted(hist, reverse=True):
+                hv = hist[k_].get(u['name'])
+                if hv is None:
+                    continue
+                if hv[0] > 0 and hv[1] > 0:
+                    prev = k_
+                    break
+            if prev:
+                since = (dt.date.fromisoformat(prev) + dt.timedelta(days=1)).isoformat()
+            else:
+                # оценка по падению суммарной закачки группы в текущем месяце
+                tot = None
+                try:
+                    tot = gens[grp][month][0]['v'][:day] if grp in gens else None
+                except Exception:
+                    tot = None
+                if tot and rf:
+                    for j in range(len(tot) - 2, -1, -1):
+                        if tot[j] is not None and tot[-1] is not None and tot[j] >= tot[-1] + rf * 0.5:
+                            since = dt.date(d.year, month, j + 2).isoformat()
+                            est = True
+                            break
+            if since:
+                days = (d.date() - dt.date.fromisoformat(since)).days + 1
+        issues.append({'name': u['name'], 'kind': u['kind'], 'status': status, 'steam': st, 'ref': rf, 'loss': round(max(0, rf - st), 0), 'hours': u['hours'],
+                       'dry': u['dry'], 'why': why, 'since': since, 'est': est, 'days': days})
+    today['unitIssues'] = issues
+    D['liq'] = parse_liq(wb8['Qж.'], month, day) if 'Qж.' in wb8.sheetnames else {}
     today['ppg3'] = {'steam': num(ms['B4'].value), 'mtd': num(ms['C4'].value), 'volga': num(ms['B5'].value), 'volgaMtd': num(ms['C5'].value), 'pressure': num(ms['B6'].value)}
     today['ppgSpguTotals'] = {'mpgu': num(ms['G30'].value), 'mpgu23': num(ms['G63'].value), 'spgu': num(ms['G168'].value), 'collPPG': num(ms['G169'].value)}
     D['today'] = today

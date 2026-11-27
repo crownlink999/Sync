@@ -6,7 +6,19 @@
 //   BRANCH   = inbox               (по умолчанию)
 // Ветка inbox каждый раз пересоздаётся ОДНИМ коммитом без истории (старые версии больших xlsx не копятся в репозитории).
 // Файл лежит как input/<slot>/<имя>; новый файл того же slot заменяет прежний. Большие файлы приходят кусками name.part001of002.
-function doGet() { return ContentService.createTextOutput('SVODKI ok'); }
+function doGet(e) {
+  // Проверка из браузера: ...exec?check=ВАШ_KEY  -> покажет, принимает ли GitHub токен и виден ли репозиторий
+  var p = PropertiesService.getScriptProperties();
+  if (e && e.parameter && e.parameter.check && e.parameter.check === p.getProperty('KEY')) {
+    var res = {repo: p.getProperty('REPO') || 'crownlink999/Sync', branch: p.getProperty('BRANCH') || 'inbox'};
+    var r = UrlFetchApp.fetch('https://api.github.com/repos/' + res.repo, {muteHttpExceptions: true,
+      headers: {Authorization: 'Bearer ' + (p.getProperty('GH_TOKEN') || '').trim(), Accept: 'application/vnd.github+json'}});
+    res.githubStatus = r.getResponseCode();
+    try { var j = JSON.parse(r.getContentText()); res.message = j.message || 'ok'; res.canPush = j.permissions ? j.permissions.push : null; } catch (x) {}
+    return ContentService.createTextOutput(JSON.stringify(res, null, 1)).setMimeType(ContentService.MimeType.JSON);
+  }
+  return ContentService.createTextOutput('SVODKI ok');
+}
 
 function doPost(e) {
   var lock = LockService.getScriptLock();
@@ -63,7 +75,7 @@ function pad3(n) { return ('000' + n).slice(-3); }
 
 function gh(url, method, payload, allow404) {
   var opt = {method: method || 'get', muteHttpExceptions: true, contentType: 'application/json',
-    headers: {Authorization: 'Bearer ' + PropertiesService.getScriptProperties().getProperty('GH_TOKEN'),
+    headers: {Authorization: 'Bearer ' + String(PropertiesService.getScriptProperties().getProperty('GH_TOKEN') || '').trim(),
               Accept: 'application/vnd.github+json'}};
   if (payload) opt.payload = JSON.stringify(payload);
   var r = UrlFetchApp.fetch(url, opt);

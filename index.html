@@ -159,6 +159,18 @@ td.nm{font-weight:700;white-space:normal;min-width:130px;max-width:210px}
 .note{font-size:12px;color:var(--dim);margin-top:8px}
 .pill{display:inline-block;font-size:11px;font-weight:700;background:#e9eee8;color:var(--mut);border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:1px}
 .empty{padding:30px;text-align:center;color:var(--mut)}
+
+/* ---------- остановки пара / выводы ---------- */
+.iss{display:flex;gap:12px;padding:12px;border-radius:14px;margin-top:8px;border:1px solid var(--line)}
+.iss.b{background:var(--badbg);border-color:#f2b9b0}.iss.w{background:var(--warnbg);border-color:#f0d9a2}
+.iss .im{flex:0 0 96px}.iss .in{font-size:10px;font-weight:800;letter-spacing:.8px}
+.iss.b .in,.iss.b .big{color:var(--bad)}.iss.w .in,.iss.w .big{color:#9a6a08}
+.iss .big{font-size:26px;font-weight:800;letter-spacing:-.5px;line-height:1.1}.iss .big small{font-size:12px;font-weight:700}
+.iss .ib{min-width:0}.iss .ib b{font-size:14.5px}.iss .s{font-size:12.5px;color:var(--mut);margin-top:2px}
+.iss .why{font-size:13px;margin-top:6px}.iss .why span{font-weight:800;color:var(--mut)}.iss .why i{color:var(--mut)}
+.rec{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}.rec h4{margin:0 0 6px;font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--mut)}
+.rc{display:flex;gap:9px;font-size:13.5px;padding:5px 0}.rc>span{color:var(--em);font-weight:800}
+.nav button{font-size:10px;padding:6px 0 4px}.nav button svg{width:21px;height:21px}
 </style>
 </head>
 <body>
@@ -295,6 +307,7 @@ const TABS=[
  ['idle','Простои','<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'],
  ['ppd','ППД','<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>'],
  ['steam','Пар','<path d="M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.7-1A4 4 0 0 1 17 18z"/><path d="M9 21v-1M13 21v-1M17 21v-1"/>'],
+ ['liq','Жидкость','<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/><path d="M9 15a3 3 0 0 0 3 3"/>'],
  ['wells','Скважины','<circle cx="12" cy="5" r="2"/><path d="M12 7v14M8 21h8M7 11l5 3 5-3"/>'],
  ['more','Ещё','<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>']
 ];
@@ -302,7 +315,7 @@ function buildNav(){ $('#nav .in').innerHTML=TABS.map(t=>`<button data-t="${t[0]
   $('#nav').addEventListener('click',e=>{const b=e.target.closest('button'); if(b){S.tab=b.dataset.t; render(true);} }); }
 function render(top){ document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===S.tab));
   const dd=D.meta.day; $('#dLbl').textContent=`${S.day} ${MG[curM()-1]}`; $('#dPrev').disabled=S.day<=1; $('#dNext').disabled=S.day>=dd;
-  const fn={home:vHome,oil:vOil,idle:vIdle,ppd:vPpd,steam:vSteam,wells:vWells,more:vMore}[S.tab]; $('#view').innerHTML=fn(); bindCharts($('#view')); bindView(); if(S.tab==='wells'&&WS) bindWells();
+  const fn={home:vHome,oil:vOil,idle:vIdle,ppd:vPpd,steam:vSteam,liq:vLiq,wells:vWells,more:vMore}[S.tab]; $('#view').innerHTML=fn(); bindCharts($('#view')); bindView(); if(S.tab==='wells'&&WS) bindWells();
   if(top) window.scrollTo({top:0}); }
 
 /* ======================= ГЛАВНАЯ ======================= */
@@ -335,7 +348,7 @@ function alerts(){
   if(siem&&zam){ const a=at(siem.v,i), b=at(zam.v,i); if(a&&b&&Math.abs(a-b)/b>.2) add('w',`<b>Закачка воды</b>: счётчик Siemens ${fmt(a)} vs замер по скважинам ${fmt(b)} м³ (${sgn(a-b)})`,'расхождение учёта более 20% — проверить достоверность'); }
   const U=D.today.units||[]; if(d===D.meta.day){
     const off=U.filter(u=>!u.steam), low=U.filter(u=>u.steam&&u.steam/u.nominal<.8), dry=U.filter(u=>u.dry&&u.dry<60);
-    if(off.length) add('b',`<b>Парогенераторы не работают</b>: ${off.map(u=>u.name.replace(/-\d+тн?\./,'').replace('.','')).join(', ')}`,'нет закачки пара за сутки'+(D.today.reasons.length?` · ${D.today.reasons[D.today.reasons.length-1].replace(/^Закачка воды, пара:.*?:\s*/,'')}`:''));
+    const stp=(D.today.unitIssues||[]).filter(x=>x.status==='stop'); if(stp.length) add('b',`<b>Не вырабатывают пар</b>: ${stp.map(x=>unitShort(x.name)+(x.days?` (${x.days} дн.)`:'')).join(', ')}`,stp.map(x=>x.why||'').filter(Boolean).join(' · ')+(stp.some(x=>x.est)?' · дата остановки — оценка':'')); else if(off.length) add('b',`<b>Парогенераторы не работают</b>: ${off.map(u=>unitShort(u.name)).join(', ')}`,'');
     if(low.length) add('w',`<b>Работают с недогрузом (&lt;80% паспорта)</b>: ${low.length} из ${U.length}`,low.slice(0,6).map(u=>u.name.replace(/-\d+тн?\./,'').replace('.','')+' '+Math.round(u.steam/u.nominal*100)+'%').join(' · ')+(low.length>6?' …':''));
     if(dry.length) add('w',`<b>Низкая сухость пара (&lt;60%)</b>: ${dry.map(u=>u.name.replace(/-\d+тн?\./,'').replace('.','')+' '+fmt(u.dry,0)+'%').join(', ')}`,'');
     const t=D.today.tech.rows.find(r=>/Всего/i.test(r.l)); if(t&&t.dev<0) add('w',`<b>Выход техники</b>: ${t.fact} из ${t.plan} (${sgn(t.dev)})`,D.today.tech.reasons.filter(r=>r.v<0).map(r=>r.l+' '+r.v).join(' · '));
@@ -511,6 +524,7 @@ function vSteam(){
   const cnt={ok:0,mid:0,low:0,off:0}; U.forEach(u=>cnt[unitClass(u)]++);
   const sumU=sum(U.map(u=>u.steam)), nomU=sum(U.map(u=>u.nominal));
   return `<div class="sec">Закачка пара · ${S.day} ${MG[M-1]}</div>
+  ${steamIssues()}
   <div class="grid g3">${kcard('steam')}
    <div class="kc"><div class="nm">Скважин под паром (ППГ)</div><div class="big num">${at(ww,i)}<small>из ${at(wa,i)}</small></div><div class="pl">загрузка ${fmt(pct(at(ww,i),at(wa,i)),0)}% ${chip(at(ww,i)-at(ww,i-1),sgn(at(ww,i)-at(ww,i-1)))}</div><div class="bar ${pct(at(ww,i),at(wa,i))<85?'warn':''}"><i style="width:${pct(at(ww,i),at(wa,i))}%"></i></div></div>
    <div class="kc"><div class="nm">СПГУ + МПГУ: загрузка</div><div class="big num">${fmt(pct(sumU,nomU),0)}<small>% паспорта</small></div><div class="pl">${fmt(sumU)} из ${fmt(nomU)} т/сут · ${U.length} установок</div><div class="bar ${pct(sumU,nomU)<85?'warn':''}"><i style="width:${pct(sumU,nomU)}%"></i></div></div></div>
@@ -574,6 +588,82 @@ function bindView(){
   v.querySelectorAll('[data-uf]').forEach(b=>b.addEventListener('click',()=>{S.uf=b.dataset.uf;const y=scrollY;render();scrollTo(0,y)}));
   v.querySelectorAll('[data-u]').forEach(b=>b.addEventListener('click',()=>showUnit(+b.dataset.u)));
   v.querySelectorAll('[data-kr]').forEach(b=>b.addEventListener('click',()=>showKr(+b.dataset.kr)));
+}
+
+/* ======================= ПАР: остановки и недовыработка ======================= */
+const dfmt=s=>{ if(!s) return '—'; const [y,m,d]=s.split('-'); return `${+d} ${MG[+m-1]}`; };
+const unitShort=n=>n.replace(/-\d+тн?\./,'').replace('.','').replace(/\s+/g,' ');
+function grp(low){ const out=[], key={}; low.forEach(x=>{ const k=!x.why&&x.kind+'|'+x.steam; if(k&&key[k]){ key[k].names.push(x.name); } else { const y={...x,names:[x.name]}; out.push(y); if(k) key[k]=y; } });
+  return out.map(y=>y.names.length>1?{...y,name:y.kind.replace('т','т')+' '+y.names.map(n=>'№'+n.split('№')[1].trim()).join(', '),loss:y.loss*y.names.length,_n:y.names.length}:y); }
+function steamIssues(){
+  const I=D.today.unitIssues; if(!I) return '';
+  if(S.day!==D.meta.day) return `<div class="note">Остановки и недовыработка показаны на дату последней сводки (${D.meta.day} ${MG[curM()-1]}).</div>`;
+  const stop=I.filter(x=>x.status==='stop'), low=I.filter(x=>x.status==='low');
+  const lossS=sum(stop.map(x=>x.loss)), lossL=sum(low.map(x=>x.loss)), loss=lossS+lossL, dp=D.series.steam.dayPlan[curM()];
+  const rec=[];
+  stop.forEach(x=>{ rec.push(`<b>${unitShort(x.name)}</b> не даёт пар${x.days?` уже ${x.days} дн.`:''}: потеря ~${fmt(x.loss)} т/сут${dp?` (${fmt(x.loss/dp*100,1)}% суточного плана)`:''}. Уточнить у ЦДН срок окончания ремонта и чем компенсируется недостающий пар.`); });
+  const mp=low.filter(x=>x.kind==='МПГУ-23т'&&x.steam===480);
+  if(mp.length>=3) rec.push(`<b>${mp.map(x=>'№'+x.name.split('№')[1].trim()).join(', ')}</b> стабильно дают 480 т/сут вместо 552 — похоже на паспортное ограничение (20 т/ч), а не на отказ. Подтвердить паспорт установок.`);
+  low.filter(x=>!(x.kind==='МПГУ-23т'&&x.steam===480)).forEach(x=>{ if(x.loss>=50) rec.push(`<b>${unitShort(x.name)}</b>: ${fmt(x.steam)} т/сут вместо типовых ${fmt(x.ref)} (−${fmt(x.loss)}). ${x.why?'Причина: '+x.why+'.':'В рапорте причина не указана — запросить у ЦДН.'}`); });
+  const U=D.today.units||[]; const odd=U.filter(u=>u.steam>0&&!u.hours);
+  if(odd.length) rec.push(`<b>${odd.map(u=>unitShort(u.name)).join(', ')}</b>: в рапорте 0 ч работы при закачке пара — ошибка данных, проверить.`);
+  const row=x=>{ const stp=x.status==='stop';
+    return `<div class="iss ${stp?'b':'w'}"><div class="im"><div class="in">${stp?'ОСТАНОВЛЕН':'НИЖЕ ТИПОВОГО'}</div><div class="big num">${stp?(x.days?x.days:'—'):fmt(x.steam)}<small>${stp?' дн.':' т/сут'}</small></div></div>
+      <div class="ib"><b>${x.name.replace(/\s+/g,' ')}</b>
+      <div class="s">${stp?`не вырабатывает пар${x.since?` с ${x.est?'≈':''}${dfmt(x.since)}${x.est?' (оценка по падению суммарной закачки группы)':''}`:''}`:`типовое для ${x.kind}: ${fmt(x.ref)} т/сут · недодано ${fmt(x.loss)} т/сут`}</div>
+      <div class="why"><span>Причина:</span> ${x.why?esc(x.why):'<i>в рапорте не указана</i>'}</div></div></div>`; };
+  return `<div class="card" style="border-color:${stop.length?'#f2b9b0':'var(--line)'}"><h3>Остановки и недовыработка пара</h3>
+   <div class="sub">на ${D.meta.day} ${MG[curM()-1]} · потеря относительно типовой выработки ${fmt(loss)} т/сут${dp?` (${fmt(loss/dp*100,1)}% суточного плана)`:''}</div>
+   <div style="margin-top:10px">${stop.concat(grp(low)).map(row).join('')||'<div class="al g"><div class="ic">✓</div><div>Все установки работают в типовом режиме</div></div>'}</div>
+   ${rec.length?`<div class="rec"><h4>Выводы и рекомендации</h4>${rec.map(t=>`<div class="rc"><span>→</span><div>${t}</div></div>`).join('')}</div>`:''}</div>`;
+}
+
+/* ======================= ЖИДКОСТЬ (лист Qж.) ======================= */
+const LIQ_CDN=[['ЦДН-1',['ГЗУ 12 ВВГ','ГЗУ 33 ПТВ','ГЗУ 34 ПТВ']],['ЦДН-2',['ГЗУ 16 ПТВ','ГЗУ 27 ПТВ']],['ЦДН-3',['ГЗУ 30 ПТВ','ГЗУ 31 ПТВ','ГЗУ 32 ПТВ']]];
+const CDNC={'ЦДН-1':C.fact,'ЦДН-2':C.blue,'ЦДН-3':C.plan};
+function lq(sec,kind,m){ return (((D.liq||{})[m]||{})[sec]||{})[kind]||[]; }
+function lqAt(sec,kind,m,i){ const a=lq(sec,kind,m); return i<a.length?a[i]:null; }
+function lqLast(sec,kind,m,day){ const a=lq(sec,kind,m); let i=Math.min(day-1,a.length-1); while(i>0&&a[i]==null)i--; return {i,v:a[i]??null}; }
+function vLiq(){
+  if(!D.liq||!D.liq[curM()]) return `<div class="empty">Нет данных листа «Qж.»</div>`;
+  const M=curM(), m=S.cm?.liq??M, day=m===M?S.day:(lq('ИТОГО','kor',m).length||1), i0=Math.min(day-1,lq('ИТОГО','kor',m).length-1);
+  const T=(k,sec='ИТОГО')=>lqLast(sec,k,m,day);
+  const kor=T('kor'), nr=T('noreg'), zam=T('zam'), wc=T('wc');
+  const prev=k=>lqAt('ИТОГО',k,m,kor.i-1);
+  const gap=kor.v-zam.v, gp=pct(gap,kor.v);
+  const dK=kor.v-prev('kor'), avg=(()=>{const a=lq('ИТОГО','kor',m).slice(0,kor.i+1).filter(x=>x!=null);return sum(a)/a.length})();
+  const kc=(nm,big,unit,pl,chp)=>`<div class="kc"><div class="nm"><span>${nm}</span></div><div class="big num">${big}<small>${unit}</small></div><div class="pl">${pl||''}</div>${chp?`<div style="margin-top:6px">${chp}</div>`:''}</div>`;
+  const labels=lq('ИТОГО','kor',m).map((_,j)=>j+1), tl=j=>`${j+1} ${MG[m-1]}`;
+  let h=`<div class="sec">Жидкость · ${day} ${MG[m-1]}</div>${monthSelector('liq',m)}
+  <div class="grid g4">
+   ${kc('Qж Кориолис',fmt(kor.v),'м³/сут',`среднее за период ${fmt(avg)}`,chip(dK,sgn(dK)+' к пред. дню'))}
+   ${kc('Без регенерации',fmt(nr.v),'м³/сут',`разница с Кориолисом ${fmt(kor.v-nr.v)}`)}
+   ${kc('Qж по замеру',fmt(zam.v),'м³/сут',`разница с Кориолисом ${fmt(gap)} (${fmt(gp,1)}%)`,chip(gp>20?-1:0,gp>20?'расхождение >20%':'в норме'))}
+   ${kc('Обводнённость',fmt(wc.v,1),'%',`пред. день ${fmt(prev('wc'),1)}`,chip(wc.v-prev('wc'),sgn(wc.v-prev('wc'),1)+' п.п.',true))}
+  </div>
+  <div class="card"><h3>Qж по дням: Кориолис и замер</h3><div class="sub">всего по МӨЦ-1+2+3 (ЦДН-1, ЦДН-2, ЦДН-3)</div>${chart({labels,tl,series:[{n:'Кориолис',c:C.fact,v:lq('ИТОГО','kor',m),t:'area'},{n:'Без регенерации',c:C.blue,v:lq('ИТОГО','noreg',m)},{n:'По замеру',c:C.plan,v:lq('ИТОГО','zam',m)}],h:230,xt:10})}</div>`;
+  // по ЦДН
+  const rows=[]; LIQ_CDN.forEach(([c,gz])=>{ rows.push([c,1]); gz.forEach(g=>rows.push([g,0])); });
+  h+=`<div class="card"><h3>По ЦДН и ГЗУ на ${day} ${MG[m-1]}</h3><div class="sub">м³/сут · красным — расхождение Кориолис и замера больше 25%</div><div class="tw"><table><thead><tr><th>Объект</th><th>Кориолис</th><th>Замер</th><th>Разница</th><th>Обв., %</th><th>Δ сут.</th></tr></thead><tbody>`+
+   rows.map(([n,isC])=>{ const k=lqLast(n,'kor',m,day), z=lqLast(n,'zam',m,day), w=lqLast(n,'wc',m,day), pk=lqAt(n,'kor',m,k.i-1);
+     const g=k.v-z.v, p=pct(g,k.v), hot=Math.abs(p)>25, d=pk!=null?k.v-pk:null;
+     return `<tr ${isC?'style="background:#f1f6f3;font-weight:800"':''}><td class="nm" style="${isC?'':'padding-left:18px;font-weight:600'}">${n}</td><td class="num">${fmt(k.v)}</td><td class="num">${fmt(z.v)}</td><td class="num ${hot?'bad':''}"><b>${sgn(g)}</b><small class="mut"> ${fmt(p,0)}%</small></td><td class="num">${fmt(w.v,1)}</td><td class="num ${d<-0.01*k.v?'bad':''}">${d==null?'—':sgn(d)}</td></tr>`; }).join('')+`</tbody></table></div></div>`;
+  // графики по ЦДН
+  h+=`<div class="card"><h3>Qж Кориолис по ЦДН</h3>${chart({labels,tl,series:LIQ_CDN.map(([c])=>({n:c,c:CDNC[c],v:lq(c,'kor',m)})),h:210,xt:10})}</div>
+  <div class="card"><h3>Обводнённость по ЦДН, %</h3>${chart({labels,tl,series:LIQ_CDN.map(([c])=>({n:c,c:CDNC[c],v:lq(c,'wc',m),d:1})).concat([{n:'Всего',c:C.grey,dash:1,v:lq('ИТОГО','wc',m),d:1}]),h:200,xt:10,yf:v=>fmt(v,0)})}</div>`;
+  // по месяцам
+  const ms=Array.from({length:M},(_,j)=>j+1), avgM=(k,s='ИТОГО')=>ms.map(j=>{const a=lq(s,k,j).filter(x=>x!=null);return a.length?sum(a)/a.length:null});
+  h+=`<div class="card"><h3>Средняя Qж по месяцам</h3>${chart({labels:ms.map(j=>MS[j-1]),series:[{n:'Кориолис',c:C.fact,t:'bar',v:avgM('kor')},{n:'Замер',c:C.plan,t:'bar',v:avgM('zam')}],h:200,min:60000})}</div>`;
+  // выводы
+  const rec=[]; const kl=lq('ИТОГО','kor',m), gi=kor.i;
+  if(gi>0&&kl[gi-1]){ const dd=(kl[gi]-kl[gi-1])/kl[gi-1]*100; if(Math.abs(dd)>=1.5) rec.push(`<b>Qж ${dd<0?'упала':'выросла'} за сутки на ${fmt(Math.abs(dd),1)}%</b> (${sgn(kl[gi]-kl[gi-1])} м³). ${dd<0?'Проверить остановки скважин, простои на ПРС и работу ЦДН, давшего основное снижение (см. колонку «Δ сут.»).':'Проверить, не связан ли рост с запуском скважин из ремонта.'}`); }
+  const gz=LIQ_CDN.flatMap(([c,l])=>l).map(g=>{const k=lqLast(g,'kor',m,day),z=lqLast(g,'zam',m,day);return {g,k:k.v,z:z.v,p:pct(k.v-z.v,k.v)}}).filter(x=>x.k&&x.z!=null).sort((a,b)=>Math.abs(b.p)-Math.abs(a.p));
+  if(gz[0]&&Math.abs(gz[0].p)>25) rec.push(`<b>Наибольшее расхождение учёта: ${gz[0].g}</b> — Кориолис ${fmt(gz[0].k)}, замер ${fmt(gz[0].z)} м³/сут (${sgn(gz[0].p,0)}%).${gz[1]&&Math.abs(gz[1].p)>25?` Также ${gz[1].g} (${sgn(gz[1].p,0)}%).`:''} Сверить замерную установку и счётчик Кориолис, проверить охват скважин замером.`);
+  if(gp>20) rec.push(`<b>В целом по месторождению Кориолис выше замера на ${fmt(gap)} м³/сут (${fmt(gp,0)}%)</b>. Если такая разница держится, добыча нефти по замеру недооценивается — согласовать методику учёта с метрологами.`);
+  const w5=kor.i>=6?wc.v-lqAt('ИТОГО','wc',m,kor.i-6):0; if(w5>=0.5) rec.push(`<b>Обводнённость растёт</b>: +${fmt(w5,1)} п.п. за 6 дней. Посмотреть ЦДН с ростом на графике и скважины с прорывом воды.`);
+  const wcd=LIQ_CDN.map(([c])=>({c,v:lqLast(c,'wc',m,day).v})).sort((a,b)=>b.v-a.v); rec.push(`Самая высокая обводнённость — <b>${wcd[0].c} (${fmt(wcd[0].v,1)}%)</b>, самая низкая — ${wcd[2].c} (${fmt(wcd[2].v,1)}%).`);
+  h+=`<div class="card"><h3>Выводы и рекомендации</h3><div class="rec" style="margin-top:6px;border:0;padding:0;background:none">${rec.map(t=>`<div class="rc"><span>→</span><div>${t}</div></div>`).join('')}</div></div>`;
+  return h;
 }
 
 /* ======================= СКВАЖИНЫ (Well Status) ======================= */
